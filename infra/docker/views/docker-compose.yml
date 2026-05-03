@@ -24,6 +24,7 @@ services:
 
 volumes:
   traceoflight-views-data:
+    name: traceoflight-views-data
 
 networks:
   edge:
