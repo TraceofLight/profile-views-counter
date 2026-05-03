@@ -306,7 +306,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/", get(views_handler))
-        .route("/api/views", get(views_handler))
+        .route("/api/v1/views-counter", get(views_handler))
         .route("/health", get(health))
         .with_state(state)
         .layer(TraceLayer::new_for_http());

@@ -1,0 +1,83 @@
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+  }
+
+  triggers {
+    githubPush()
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+
+    stage('Prepare Env') {
+      steps {
+        sh '''
+          cp infra/docker/views/.env.example infra/docker/views/.env
+          # Normalize Windows CRLF to LF for safe shell parsing.
+          sed -i 's/\r$//' infra/docker/views/.env
+
+          for key in VIEWS_PORT RUST_LOG; do
+            if ! grep -Eq "^${key}=.+" infra/docker/views/.env; then
+              echo "ERROR: required env key is missing or empty: ${key}"
+              exit 1
+            fi
+          done
+        '''
+      }
+    }
+
+    stage('Verify Edge Network') {
+      steps {
+        sh '''
+          docker network inspect traceoflight-edge >/dev/null 2>&1 || {
+            echo "ERROR: traceoflight-edge network not found. Run the traceoflight-dev infra pipeline first."
+            exit 1
+          }
+        '''
+      }
+    }
+
+    stage('Deploy Views') {
+      steps {
+        dir('infra/docker/views') {
+          sh 'docker compose --env-file .env up -d --build --no-deps views'
+        }
+      }
+    }
+
+    stage('Healthcheck') {
+      steps {
+        sh '''
+          for i in $(seq 1 30); do
+            if docker run --rm --network traceoflight-edge curlimages/curl:latest -fsS http://views:3000/health >/dev/null 2>&1; then
+              echo "Views healthcheck passed"
+              exit 0
+            fi
+            echo "Waiting for views startup... ($i/30)"
+            sleep 2
+          done
+
+          echo "Views healthcheck failed. Recent container logs:"
+          docker logs --tail 200 traceoflight-views || true
+          exit 1
+        '''
+      }
+    }
+  }
+
+  post {
+    always {
+      sh 'rm -f infra/docker/views/.env || true'
+      sh 'docker container prune -f || true'
+      sh 'docker image prune -f || true'
+    }
+  }
+}

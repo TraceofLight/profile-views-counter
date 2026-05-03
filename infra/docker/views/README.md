@@ -26,12 +26,12 @@ The container exposes port `3000` on the `traceoflight-edge` network with alias 
 In nginx-proxy-manager, add a Custom Location to the existing `www.traceoflight.dev`
 proxy host:
 
-- Location: `/api/views`
+- Location: `/api/v1/views-counter`
 - Scheme: `http`
 - Forward Hostname: `views`
 - Forward Port: `3000`
 
-The Rust app handles both `/` and `/api/views` so no path rewriting is needed.
+The Rust app handles both `/` and `/api/v1/views-counter` so no path rewriting is needed.
 
 ## Verifying
 
@@ -40,7 +40,7 @@ The Rust app handles both `/` and `/api/views` so no path rewriting is needed.
 curl http://views:3000/health
 
 # end-to-end after NPM is wired up
-curl "https://www.traceoflight.dev/api/views?username=TraceofLight"
+curl "https://www.traceoflight.dev/api/v1/views-counter?username=TraceofLight"
 ```
 
 ## Data

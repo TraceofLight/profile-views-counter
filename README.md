@@ -14,7 +14,7 @@ Inspired by [antonkomarev/github-profile-views-counter](https://github.com/anton
 ## API
 
 ```
-GET /api/views?username=<name>&label=<text>&color=<hex>&style=<style>&abbreviated=<bool>&base=<int>
+GET /api/v1/views-counter?username=<name>&label=<text>&color=<hex>&style=<style>&abbreviated=<bool>&base=<int>
 ```
 
 The same handler is also mounted at `/`, so the path can be controlled at the proxy.
@@ -43,4 +43,4 @@ cargo run
 
 See [`infra/docker/views/README.md`](./infra/docker/views/README.md). Deployment uses
 Docker Compose against the existing `traceoflight-edge` network and is reverse-proxied
-by nginx-proxy-manager under `www.traceoflight.dev/api/views`.
+by nginx-proxy-manager under `www.traceoflight.dev/api/v1/views-counter`.
