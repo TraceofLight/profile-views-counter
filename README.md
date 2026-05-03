@@ -28,7 +28,7 @@ The same handler is also mounted at `/`, so the path can be controlled at the pr
 | `abbreviated` | `false`    | when true, formats `1234` as `1.2k`                                  |
 | `base`        | `0`        | constant offset added to the count (e.g. for migrating from komarev) |
 
-Response is `image/svg+xml` with `Cache-Control: no-store` (Camo will cache, browsers won't).
+Response is `image/svg+xml` with `Cache-Control: public, max-age=300, s-maxage=300`. GitHub's image proxy (Camo, fronted by Fastly) caches the badge for 5 minutes, so a profile gets a fresh count every 5 minutes per CDN edge instead of once per render. This trades exact-per-fetch granularity for visitor-side speed (~30 ms HIT vs ~800 ms MISS).
 
 ## Counting semantics
 

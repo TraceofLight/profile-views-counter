@@ -132,9 +132,11 @@ async fn views_handler(
 }
 
 fn extract_client_ip(headers: &HeaderMap) -> String {
-    if let Some(v) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
-        if !v.is_empty() {
-            return v.to_string();
+    for header in ["cf-connecting-ip", "x-real-ip"] {
+        if let Some(v) = headers.get(header).and_then(|v| v.to_str().ok()) {
+            if !v.is_empty() {
+                return v.to_string();
+            }
         }
     }
     if let Some(v) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
@@ -173,7 +175,7 @@ fn badge_response(svg: String) -> axum::response::Response {
             (header::CONTENT_TYPE, "image/svg+xml; charset=utf-8"),
             (
                 header::CACHE_CONTROL,
-                "max-age=0, no-cache, no-store, must-revalidate",
+                "public, max-age=300, s-maxage=300",
             ),
         ],
         svg,
