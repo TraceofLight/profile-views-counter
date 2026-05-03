@@ -1,8 +1,9 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use axum::{
     extract::{Query, State},
-    http::header,
+    http::{header, HeaderMap},
     response::IntoResponse,
     routing::get,
     Router,
@@ -16,6 +17,8 @@ use tower_http::trace::TraceLayer;
 #[derive(Clone)]
 struct AppState {
     db: SqlitePool,
+    allowed_usernames: Arc<Vec<String>>,
+    ip_salt: Arc<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -60,29 +63,64 @@ where
 
 async fn views_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(p): Query<ViewParams>,
 ) -> impl IntoResponse {
     if !valid_username(&p.username) {
         return error_response("invalid username");
     }
 
-    if let Err(e) = sqlx::query(
-        "INSERT INTO views (username, count) VALUES (?, 1)
-         ON CONFLICT(username) DO UPDATE SET count = count + 1, updated_at = CURRENT_TIMESTAMP",
-    )
-    .bind(&p.username)
-    .execute(&state.db)
-    .await
-    {
-        tracing::error!(error = %e, "failed to increment counter");
-        return error_response("db error");
+    let username_lower = p.username.to_ascii_lowercase();
+    if !state.allowed_usernames.iter().any(|u| u == &username_lower) {
+        return error_response("not allowed");
     }
 
-    let count: i64 = sqlx::query_scalar("SELECT count FROM views WHERE username = ?")
+    let ip = extract_client_ip(&headers);
+    let ip_hash = hash_ip(&state.ip_salt, &ip);
+
+    let claimed: Option<i64> = match sqlx::query_scalar(
+        "INSERT INTO view_events (username, ip_hash) VALUES (?, ?) \
+         ON CONFLICT(username, ip_hash) DO UPDATE SET last_seen = CURRENT_TIMESTAMP \
+         WHERE view_events.last_seen < datetime('now', '-1 hour') \
+         RETURNING 1",
+    )
+    .bind(&p.username)
+    .bind(&ip_hash)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!(error = %e, "dedup query failed");
+            return error_response("db error");
+        }
+    };
+
+    let count: i64 = if claimed.is_some() {
+        match sqlx::query_scalar(
+            "INSERT INTO views (username, count) VALUES (?, 1) \
+             ON CONFLICT(username) DO UPDATE SET count = count + 1, updated_at = CURRENT_TIMESTAMP \
+             RETURNING count",
+        )
         .bind(&p.username)
         .fetch_one(&state.db)
         .await
-        .unwrap_or(0);
+        {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to increment counter");
+                return error_response("db error");
+            }
+        }
+    } else {
+        sqlx::query_scalar("SELECT count FROM views WHERE username = ?")
+            .bind(&p.username)
+            .fetch_optional(&state.db)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(0)
+    };
 
     let total = count.saturating_add(p.base);
     let display = format_count(total, p.abbreviated);
@@ -91,6 +129,38 @@ async fn views_handler(
     let svg = render_badge(&label, &display, &color, p.style);
 
     badge_response(svg)
+}
+
+fn extract_client_ip(headers: &HeaderMap) -> String {
+    if let Some(v) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
+        if !v.is_empty() {
+            return v.to_string();
+        }
+    }
+    if let Some(v) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
+        if let Some(first) = v.split(',').next() {
+            let trimmed = first.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+    }
+    "unknown".to_string()
+}
+
+fn hash_ip(salt: &str, ip: &str) -> String {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write;
+    let mut hasher = Sha256::new();
+    hasher.update(salt.as_bytes());
+    hasher.update(b":");
+    hasher.update(ip.as_bytes());
+    let bytes = hasher.finalize();
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        let _ = write!(s, "{:02x}", b);
+    }
+    s
 }
 
 async fn health() -> &'static str {
@@ -302,7 +372,28 @@ async fn main() -> anyhow::Result<()> {
 
     sqlx::migrate!("./migrations").run(&db).await?;
 
-    let state = AppState { db };
+    let allowed_usernames: Vec<String> = std::env::var("ALLOWED_USERNAMES")
+        .unwrap_or_else(|_| "TraceofLight".to_string())
+        .split(',')
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if allowed_usernames.is_empty() {
+        tracing::warn!("ALLOWED_USERNAMES is empty; all requests will be rejected");
+    } else {
+        tracing::info!(?allowed_usernames, "username allowlist active");
+    }
+
+    let ip_salt = std::env::var("IP_HASH_SALT").unwrap_or_else(|_| {
+        tracing::warn!("IP_HASH_SALT not set; using insecure default");
+        "default-insecure-salt".to_string()
+    });
+
+    let state = AppState {
+        db,
+        allowed_usernames: Arc::new(allowed_usernames),
+        ip_salt: Arc::new(ip_salt),
+    };
 
     let app = Router::new()
         .route("/", get(views_handler))

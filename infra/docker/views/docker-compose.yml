@@ -13,6 +13,8 @@ services:
       DATABASE_URL: sqlite:/data/counter.db?mode=rwc
       PORT: ${VIEWS_PORT:-3000}
       RUST_LOG: ${RUST_LOG:-info}
+      ALLOWED_USERNAMES: ${ALLOWED_USERNAMES:-TraceofLight}
+      IP_HASH_SALT: ${IP_HASH_SALT}
     volumes:
       - traceoflight-views-data:/data
     expose:

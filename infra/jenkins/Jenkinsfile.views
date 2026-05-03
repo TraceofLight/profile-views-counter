@@ -24,7 +24,15 @@ pipeline {
           # Normalize Windows CRLF to LF for safe shell parsing.
           sed -i 's/\r$//' infra/docker/views/.env
 
-          for key in VIEWS_PORT RUST_LOG; do
+          # IP_HASH_SALT ships as a placeholder in .env.example; substitute a fresh
+          # random value at deploy time. The salt only needs consistency within the
+          # 1-hour dedup window — restarts roll over and that's acceptable.
+          if grep -Eq "^IP_HASH_SALT=replace-with-random-hex$" infra/docker/views/.env; then
+            SALT=$(openssl rand -hex 32 2>/dev/null || head -c 64 /dev/urandom | od -An -tx1 | tr -d ' \n')
+            sed -i "s|^IP_HASH_SALT=.*|IP_HASH_SALT=${SALT}|" infra/docker/views/.env
+          fi
+
+          for key in VIEWS_PORT RUST_LOG ALLOWED_USERNAMES IP_HASH_SALT; do
             if ! grep -Eq "^${key}=.+" infra/docker/views/.env; then
               echo "ERROR: required env key is missing or empty: ${key}"
               exit 1

@@ -984,6 +984,7 @@ dependencies = [
  "anyhow",
  "axum",
  "serde",
+ "sha2",
  "sqlx",
  "tokio",
  "tower-http",
